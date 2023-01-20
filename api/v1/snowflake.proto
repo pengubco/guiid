@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+option go_package = "github.com/pengubco/snowflake-id/api/v1";
+
+import "google/protobuf/empty.proto";
+
+service SnowflakeID {
+  rpc nextID(google.protobuf.Empty) returns (IDResponse);
+}
+
+message IDResponse {
+  int64 id = 1;
+}

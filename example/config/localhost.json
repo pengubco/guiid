@@ -1,0 +1,7 @@
+{
+  "etcd_endpoints": ["localhost:2379"],
+  "etcd_prefix": "/snowflake-id/",
+  "etcd_username": "snowflake-id",
+  "etcd_password": "passwd",
+  "max_server_cnt": 1024
+}
