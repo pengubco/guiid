@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"golang.org/x/exp/slices"
 	"strconv"
 	"time"
 
@@ -25,12 +26,12 @@ var (
 )
 
 const (
-	// The pattern of key representing whether the worker is live, e.g., "workers/live/10".
+	// The prefix of key representing whether the worker is live, e.g., "workers/live/10".
 	// The key is associated with a lease. The value is a metadata describing the worker.
-	liveWorkerKeyPattern = "workers/live/%d"
+	liveWorkerKeyPrefix = "workers/live"
 
-	// The pattern of key for the last reported milliseconds of the worker.
-	lastReportedTimeKeyPattern = "workers/last_reported_time/%d"
+	// The prefix of key representing the last reported milliseconds of the worker.
+	lastReportedTimeKeyPrefix = "workers/last_reported_time"
 
 	// heartbeat must be more frequent than lease refresh.
 	leaseTTL              = 10 // 10 seconds
@@ -179,10 +180,13 @@ func (s *Worker) start() bool {
 		}
 	}()
 
-	// TODO: list available IDs, instead of going over ids 1 by 1.
+	unavailableIDs := s.unavailableWorkerIDs(ctx)
 	id := 0
 	var g *Generator
 	for ; id < s.maxWorkerCnt; id++ {
+		if slices.Contains(unavailableIDs, id) {
+			continue
+		}
 		if !s.isWorkerIDAvailable(ctx, id) {
 			continue
 		}
@@ -220,19 +224,19 @@ func (s *Worker) start() bool {
 }
 
 func (s *Worker) reportLastUsedTime() bool {
-	liveWorkerKey := fmt.Sprintf(liveWorkerKeyPattern, s.workerID)
-	reportedTimeKey := fmt.Sprintf(lastReportedTimeKeyPattern, s.workerID)
+	workerKey := liveWorkerKey(s.workerID)
+	reportedTimeKey := lastReportedTimestampKey(s.workerID)
 	reportedTime := strconv.FormatInt(s.generator.LastUsedTimestamp(), 10)
 
 	ctx, cancel := context.WithTimeout(context.Background(), etcdCommandTimeout)
 	defer cancel()
 
 	commit, err := s.etcdClient.Txn(ctx).If(
-		clientv3.Compare(clientv3.LeaseValue(liveWorkerKey), "=", s.leaseID),
+		clientv3.Compare(clientv3.LeaseValue(workerKey), "=", s.leaseID),
 	).Then(
 		clientv3.OpPut(reportedTimeKey, reportedTime),
 	).Else(
-		clientv3.OpGet(liveWorkerKey),
+		clientv3.OpGet(workerKey),
 	).Commit()
 
 	if err != nil || !commit.Succeeded || len(commit.Responses) != 1 {
@@ -277,8 +281,7 @@ func (s *Worker) Stop() {
 
 // isWorkerIDAvailable checks whether the current worker can claim a worker ID.
 func (s *Worker) isWorkerIDAvailable(ctx context.Context, id int) bool {
-	k := fmt.Sprintf(liveWorkerKeyPattern, id)
-	resp, err := s.etcdClient.Get(ctx, k)
+	resp, err := s.etcdClient.Get(ctx, liveWorkerKey(id))
 	if err != nil {
 		zap.S().Error(err)
 		return false
@@ -288,8 +291,7 @@ func (s *Worker) isWorkerIDAvailable(ctx context.Context, id int) bool {
 		return false
 	}
 
-	k = fmt.Sprintf("%s/%d", lastReportedTimeKeyPattern, id)
-	resp, err = s.etcdClient.Get(ctx, k)
+	resp, err = s.etcdClient.Get(ctx, lastReportedTimestampKey(id))
 	if err != nil {
 		zap.S().Error(err)
 		return false
@@ -312,16 +314,16 @@ func (s *Worker) isWorkerIDAvailable(ctx context.Context, id int) bool {
 
 // claimWorkerID takes the worker id. Etcd transactions are serializable. Thus, no two workers can take the same ID.
 func (s *Worker) claimWorkerID(ctx context.Context, id int) bool {
-	liveWorker := fmt.Sprintf(liveWorkerKeyPattern, id)
-	reportedTime := fmt.Sprintf(lastReportedTimeKeyPattern, id)
+	workerKey := liveWorkerKey(id)
+	reportedTimeKey := lastReportedTimestampKey(id)
 
 	commit, err := s.etcdClient.Txn(ctx).If(
-		clientv3.Compare(clientv3.Version(liveWorker), "=", 0),
+		clientv3.Compare(clientv3.Version(workerKey), "=", 0),
 	).Then(
-		clientv3.OpPut(liveWorker, strconv.FormatInt(time.Now().UnixMilli(), 10), clientv3.WithLease(s.leaseID)),
-		clientv3.OpGet(reportedTime),
+		clientv3.OpPut(workerKey, strconv.FormatInt(time.Now().UnixMilli(), 10), clientv3.WithLease(s.leaseID)),
+		clientv3.OpGet(reportedTimeKey),
 	).Else(
-		clientv3.OpGet(liveWorker),
+		clientv3.OpGet(workerKey),
 	).Commit()
 	if err != nil || !commit.Succeeded {
 		zap.S().Warnf("Cannot claim worker id %d in a transaction, %v, %+v", id, err, commit)
@@ -357,6 +359,26 @@ func (s *Worker) claimWorkerID(ctx context.Context, id int) bool {
 	return true
 }
 
+// unavailableWorkerIDs returns worker IDs that are in use.
+func (s *Worker) unavailableWorkerIDs(ctx context.Context) []int {
+	resp, err := s.etcdClient.Get(ctx, liveWorkerKeyPrefix, clientv3.WithPrefix())
+	if err != nil {
+		zap.S().Error(err)
+		return nil
+	}
+	var ids []int
+	for _, r := range resp.Kvs {
+		idStr := string(r.Key)[len(liveWorkerKeyPrefix)+1:]
+		i, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			zap.S().Errorf("cannot parse worker id from %s, %v", string(r.Key), err)
+			continue
+		}
+		ids = append(ids, int(i))
+	}
+	return ids
+}
+
 // StopChannel returns a channel that notifies when the snowflake worker has stopped.
 func (s *Worker) StopChannel() <-chan struct{} {
 	return s.stopChan
@@ -368,4 +390,12 @@ func (s *Worker) Ready() bool {
 
 func (s *Worker) Live() bool {
 	return s.state != stateStopped
+}
+
+func liveWorkerKey(id int) string {
+	return fmt.Sprintf("%s/%d", liveWorkerKeyPrefix, id)
+}
+
+func lastReportedTimestampKey(id int) string {
+	return fmt.Sprintf("%s/%d", lastReportedTimeKeyPrefix, id)
 }
