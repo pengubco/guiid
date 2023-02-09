@@ -25,18 +25,18 @@ var (
 )
 
 const (
-	// The pattern of key representing whether the server is live, e.g., "servers/live/10".
-	// The key is associated with a lease. The value is a metadata describing the server.
-	liveServerKeyPattern = "servers/live/%d"
+	// The pattern of key representing whether the worker is live, e.g., "workers/live/10".
+	// The key is associated with a lease. The value is a metadata describing the worker.
+	liveWorkerKeyPattern = "workers/live/%d"
 
-	// The pattern of key for the last reported milliseconds of the server.
-	lastReportedTimeKeyPattern = "servers/last_reported_time/%d"
+	// The pattern of key for the last reported milliseconds of the worker.
+	lastReportedTimeKeyPattern = "workers/last_reported_time/%d"
 
 	// heartbeat must be more frequent than lease refresh.
 	leaseTTL              = 10 // 10 seconds
 	heartbeatReportPeriod = 3 * time.Second
 
-	serverStartTimeout = 2 * time.Minute
+	workerStartTimeout = 2 * time.Minute
 
 	// max time allowed to run etcd command
 	etcdCommandTimeout = 2 * time.Second
@@ -61,11 +61,11 @@ type Worker struct {
 	generator    *Generator
 	workerID     int
 	leaseID      clientv3.LeaseID
-	maxServerCnt int
+	maxWorkerCnt int
 
 	heartbeatTicker *time.Ticker
 
-	// the state of the server transition: starting -> ready -> stopped.
+	// the state of the worker transition: starting -> ready -> stopped.
 	state int
 
 	// notification channel to stop and exit
@@ -73,7 +73,7 @@ type Worker struct {
 }
 
 // NewWorker creates a new worker and adds the worker to a cluster.
-func NewWorker(endpoints []string, prefix, username, password string, maxServerCnt int) (*Worker, error) {
+func NewWorker(endpoints []string, prefix, username, password string, maxWorkerCnt int) (*Worker, error) {
 	cli, err := clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
 		DialTimeout: etcdDialTimeout,
@@ -98,7 +98,7 @@ func NewWorker(endpoints []string, prefix, username, password string, maxServerC
 
 	s := Worker{
 		etcdClient:   cli,
-		maxServerCnt: maxServerCnt,
+		maxWorkerCnt: maxWorkerCnt,
 		state:        stateStarting,
 		stopChan:     make(chan struct{}, 1),
 	}
@@ -123,9 +123,9 @@ func NewWorker(endpoints []string, prefix, username, password string, maxServerC
 //
 // We categorize the clock-drift in 3 buckets and handle them accordingly.
 // bucket 1: [0, maxClockDriftToBlockInMillis): block by the drift time and return success.
-// bucket 2: [maxClockDriftToBlockInMillis, maxClockDriftToReturnErrorInMillis]: return error (try later) immediately. We expect clients retry request on a different server.
+// bucket 2: [maxClockDriftToBlockInMillis, maxClockDriftToReturnErrorInMillis]: return error (try later) immediately. We expect clients retry request on a different worker.
 // bucket 3: [maxClockDriftToReturnErrorInMillis, infinity): something is wrong, we return error (try later) and remove the worker from the cluster.
-// We recommend setting maxClockDriftToBlockInMillis to some value between 1 second and 2 seconds. That should avoid where all servers have a short clock drift (e.g. leap second)
+// We recommend setting maxClockDriftToBlockInMillis to some value between 1 second and 2 seconds. That should avoid where all workers have a short clock drift (e.g. leap second)
 // and client retries double the requests.
 func (s *Worker) NextID() (int64, error) {
 	if !s.Ready() {
@@ -148,7 +148,7 @@ func (s *Worker) NextID() (int64, error) {
 		zap.S().Errorf("clock drift, do not block, return error so client can try later on a different worker. drift: %d", drift)
 		return 0, ErrClockDriftTryLater
 	default:
-		zap.S().Errorf("clock drift too large. stop the server. drift: %d", drift)
+		zap.S().Errorf("clock drift too large. stop the worker. drift: %d", drift)
 		s.Stop()
 		return 0, ErrClockDriftTooLargeToRecover
 	}
@@ -157,7 +157,7 @@ func (s *Worker) NextID() (int64, error) {
 
 // start starts the worker by joining the cluster and setup background goroutines.
 func (s *Worker) start() bool {
-	ctx, cancel := context.WithTimeout(context.Background(), serverStartTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), workerStartTimeout)
 	defer cancel()
 
 	resp, err := s.etcdClient.Grant(ctx, leaseTTL)
@@ -182,29 +182,29 @@ func (s *Worker) start() bool {
 	// TODO: list available IDs, instead of going over ids 1 by 1.
 	id := 0
 	var g *Generator
-	for ; id < s.maxServerCnt; id++ {
-		if !s.isServerIDAvailable(ctx, id) {
+	for ; id < s.maxWorkerCnt; id++ {
+		if !s.isWorkerIDAvailable(ctx, id) {
 			continue
 		}
 		if g, err = NewGenerator(id); err != nil {
-			zap.S().Infof("cannot create generator with server id %d", id)
+			zap.S().Infof("cannot create generator with worker id %d", id)
 			continue
 		}
-		if !s.claimServerID(ctx, id) {
-			zap.S().Infof("cannot claim server id %d", id)
+		s.workerID = id
+		s.generator = g
+		if !s.claimWorkerID(ctx, id) {
+			zap.S().Infof("cannot claim worker id %d", id)
 			continue
 		} else {
 			break
 		}
 	}
-	if id == s.maxServerCnt {
-		zap.S().Errorf("exhausted %d server IDs", s.maxServerCnt)
+	if id == s.maxWorkerCnt {
+		zap.S().Errorf("exhausted %d worker IDs", s.maxWorkerCnt)
 		return false
 	}
 
-	zap.S().Infof("claimed server id %d", id)
-	s.workerID = id
-	s.generator = g
+	zap.S().Infof("claimed worker id %d", id)
 	s.heartbeatTicker = time.NewTicker(heartbeatReportPeriod)
 
 	// Start go routine to report lsat used timestamp periodically.
@@ -220,7 +220,7 @@ func (s *Worker) start() bool {
 }
 
 func (s *Worker) reportLastUsedTime() bool {
-	liveServerKey := fmt.Sprintf(liveServerKeyPattern, s.workerID)
+	liveWorkerKey := fmt.Sprintf(liveWorkerKeyPattern, s.workerID)
 	reportedTimeKey := fmt.Sprintf(lastReportedTimeKeyPattern, s.workerID)
 	reportedTime := strconv.FormatInt(s.generator.LastUsedTimestamp(), 10)
 
@@ -228,11 +228,11 @@ func (s *Worker) reportLastUsedTime() bool {
 	defer cancel()
 
 	commit, err := s.etcdClient.Txn(ctx).If(
-		clientv3.Compare(clientv3.LeaseValue(liveServerKey), "=", s.leaseID),
+		clientv3.Compare(clientv3.LeaseValue(liveWorkerKey), "=", s.leaseID),
 	).Then(
 		clientv3.OpPut(reportedTimeKey, reportedTime),
 	).Else(
-		clientv3.OpGet(liveServerKey),
+		clientv3.OpGet(liveWorkerKey),
 	).Commit()
 
 	if err != nil || !commit.Succeeded || len(commit.Responses) != 1 {
@@ -242,7 +242,7 @@ func (s *Worker) reportLastUsedTime() bool {
 
 	op := commit.Responses[0]
 	if op.GetResponseRange() != nil {
-		zap.S().Errorf("lease id of key %d is differernt from server's lease id %d",
+		zap.S().Errorf("lease id of key %d is differernt from worker's lease id %d",
 			op.GetResponseRange().Kvs[0].Lease, s.leaseID)
 		return false
 	}
@@ -254,7 +254,7 @@ func (s *Worker) reportLastUsedTime() bool {
 	return true
 }
 
-// Stop stops the snowflake server. This is public method so that it can be called, e.g. called by the main thread on app exit.
+// Stop stops the snowflake worker. This is public method so that it can be called, e.g. called by the main thread on app exit.
 func (s *Worker) Stop() {
 	if s.state == stateStopped {
 		return
@@ -275,16 +275,16 @@ func (s *Worker) Stop() {
 	s.stopChan <- struct{}{}
 }
 
-// isServerIDAvailable checks whether the current server can claim a server ID.
-func (s *Worker) isServerIDAvailable(ctx context.Context, id int) bool {
-	k := fmt.Sprintf(liveServerKeyPattern, id)
+// isWorkerIDAvailable checks whether the current worker can claim a worker ID.
+func (s *Worker) isWorkerIDAvailable(ctx context.Context, id int) bool {
+	k := fmt.Sprintf(liveWorkerKeyPattern, id)
 	resp, err := s.etcdClient.Get(ctx, k)
 	if err != nil {
 		zap.S().Error(err)
 		return false
 	}
 	if resp.Count > 0 {
-		zap.S().Errorf("server id %d is in use", id)
+		zap.S().Errorf("worker id %d is in use", id)
 		return false
 	}
 
@@ -294,9 +294,9 @@ func (s *Worker) isServerIDAvailable(ctx context.Context, id int) bool {
 		zap.S().Error(err)
 		return false
 	}
-	// The server-id has been used by some server previously. But the server has stopped using the ID for some reason.
-	// If the current milliseconds are larger than (the last reported milliseconds of the stopped server + heartbeatReportPeriod),
-	// then the current server can reuse the server id.
+	// The worker-id has been used by some worker previously. But the worker has stopped using the ID for some reason.
+	// If the current milliseconds are larger than (the last reported milliseconds of the stopped worker + heartbeatReportPeriod),
+	// then the current worker can reuse the worker id.
 	if resp.Count > 0 {
 		t, err := strconv.ParseInt(string(resp.Kvs[0].Value), 10, 64)
 		if err != nil {
@@ -310,37 +310,54 @@ func (s *Worker) isServerIDAvailable(ctx context.Context, id int) bool {
 	return true
 }
 
-// claimServerID takes the server id. Etcd transactions are serializable which guarantees
-// no two servers can take the same ID.
-func (s *Worker) claimServerID(ctx context.Context, id int) bool {
-	k := fmt.Sprintf(liveServerKeyPattern, id)
+// claimWorkerID takes the worker id. Etcd transactions are serializable. Thus, no two workers can take the same ID.
+func (s *Worker) claimWorkerID(ctx context.Context, id int) bool {
+	liveWorker := fmt.Sprintf(liveWorkerKeyPattern, id)
+	reportedTime := fmt.Sprintf(lastReportedTimeKeyPattern, id)
 
 	commit, err := s.etcdClient.Txn(ctx).If(
-		clientv3.Compare(clientv3.Version(k), "=", 0),
+		clientv3.Compare(clientv3.Version(liveWorker), "=", 0),
 	).Then(
-		clientv3.OpPut(k, strconv.FormatInt(time.Now().UnixMilli(), 10), clientv3.WithLease(s.leaseID)),
+		clientv3.OpPut(liveWorker, strconv.FormatInt(time.Now().UnixMilli(), 10), clientv3.WithLease(s.leaseID)),
+		clientv3.OpGet(reportedTime),
 	).Else(
-		clientv3.OpGet(k),
+		clientv3.OpGet(liveWorker),
 	).Commit()
-	if err != nil || !commit.Succeeded || len(commit.Responses) != 1 {
-		zap.S().Warnf("cannot claim server id in a transaction, %v, %+v", err, commit)
+	if err != nil || !commit.Succeeded {
+		zap.S().Warnf("Cannot claim worker id %d in a transaction, %v, %+v", id, err, commit)
 		return false
 	}
 
-	op := commit.Responses[0]
-	if op.GetResponseRange() != nil {
-		zap.S().Warnf("Worker id already claimed by another server with lease id %d", op.GetResponseRange().Kvs[0].Lease)
+	switch len(commit.Responses) {
+	// executed the Else branch. The id is in use.
+	case 1:
+		zap.S().Warnf("Worker id %d already claimed by another worker with lease id %d", id,
+			commit.Responses[0].GetResponseRange().Kvs[0].Lease)
+		return false
+	// executed the If branch. Claimed worker id and return the last reported time associated with the worker id.
+	case 2:
+		r := commit.Responses[1].GetResponseRange()
+		if r.Count == 0 {
+			break
+		}
+		// The worker has been used before and there is a reported timestamp.
+		v := string(r.Kvs[0].Value)
+		t, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			zap.S().Error("Reported timestamp not recognized. %s", v)
+			return false
+		}
+		s.generator.SetLastUsedTimestamp(t)
+		zap.S().Infof("Set last reported timestamp to %d", t)
+	default:
+		zap.S().Errorf("Unrecognized claim worker id transaction response. %+v", commit.Responses)
 		return false
 	}
-	if op.GetResponsePut() == nil {
-		zap.S().Errorf("Unrecognized claim server id transaction response. %+v. It should either be a Get or Put.", op)
-		return false
-	}
-	zap.S().Infof("Successfully claimed server id, %d", id)
+	zap.S().Infof("Successfully claimed worker id, %d", id)
 	return true
 }
 
-// StopChannel returns a channel that notifies when the snowflake server has stopped.
+// StopChannel returns a channel that notifies when the snowflake worker has stopped.
 func (s *Worker) StopChannel() <-chan struct{} {
 	return s.stopChan
 }

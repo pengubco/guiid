@@ -66,9 +66,14 @@ func (g *Generator) Next() (int64, int64) {
 	return (timestamp << timestampShiftBits) | g.serveIDShifted | g.sequenceID, 0
 }
 
-// LastUsedTimestamp returns the timestamp last used to generate snowflake ID.
+// LastUsedTimestamp returns the last timestamp used to generate snowflake ID.
 func (g *Generator) LastUsedTimestamp() int64 {
 	return g.previousTimestamp
+}
+
+// SetLastUsedTimestamp sets the last timestamp used to generate snowflake ID.
+func (g *Generator) SetLastUsedTimestamp(t int64) {
+	g.previousTimestamp = t
 }
 
 // blockPastMillis blocks till timestamp is larger than t. Returns the timestamp.
