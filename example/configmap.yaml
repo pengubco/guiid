@@ -1,14 +1,14 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: snowflake-id-config
-  namespace: snowflake-id
+  name: guiid-config
+  namespace: guiid
 data:
   config.json: |
     {
       "etcd_endpoints": ["myetcd-svc:2379"],
-      "etcd_prefix": "/snowflake-id/",
-      "etcd_username": "snowflake-id",
+      "etcd_prefix": "/guiid/",
+      "etcd_username": "guiid",
       "etcd_password": "passwd",
       "max_server_cnt": 1024
     }

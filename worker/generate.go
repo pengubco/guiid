@@ -34,7 +34,7 @@ func NewGenerator(workerID int) (*Generator, error) {
 	return &Generator{serveIDShifted: int64(workerID) << sequenceIDBits}, nil
 }
 
-// Next returns snowflake ID and clock drift. If there is clock drift, the snowflake ID is 0.
+// Next returns snowflake ID and clock drift. In the case of clock drift, the returned snowflake ID is 0.
 //
 // The snowflake id is a 64-bits long integer.
 // bit 1 (most significant bit): set to 0, indicate this is a positive number.

@@ -1,4 +1,4 @@
-module github.com/pengubco/snowflake-id
+module github.com/pengubco/guiid
 
 go 1.19
 

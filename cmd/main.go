@@ -13,15 +13,15 @@ import (
 	"syscall"
 	"time"
 
-	pb "github.com/pengubco/snowflake-id/api/v1"
-	"github.com/pengubco/snowflake-id/worker"
+	pb "github.com/pengubco/guiid/api/v1"
+	"github.com/pengubco/guiid/worker"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
 const (
-	// the listening port of the grpc snowflake id server. 7669 is "SNOW" on old phone keys.
+	// the listening port of the grpc snowflake id server. 7669 is "SNOW" on old touch-tone keypad.
 	grpcPort = 7669
 
 	// the listening port for Prometheus metric, pprof and probing (/ready, /live)
