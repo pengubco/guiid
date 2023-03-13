@@ -8,7 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	clientv3 "go.etcd.io/etcd/client/v3"
+	ec "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/namespace"
 	"go.uber.org/zap"
 )
@@ -27,29 +27,30 @@ var (
 
 const (
 	// The prefix of key representing whether the worker is live, e.g., "workers/live/10".
-	// The key is associated with a lease. The value is a metadata describing the worker.
+	// The key is associated with a lease. The value is the timestamp the worker claimed th worker ID.
 	liveWorkerKeyPrefix = "workers/live"
 
-	// The prefix of key representing the last reported milliseconds of the worker.
+	// The prefix of key representing the last reported milliseconds of the worker, e.g., "workers/last_reported_time"
+	// The value is timestamp last reported by a worker.
 	lastReportedTimeKeyPrefix = "workers/last_reported_time"
 
 	// heartbeat must be more frequent than lease refresh.
 	leaseTTL              = 10 // 10 seconds
 	heartbeatReportPeriod = 3 * time.Second
 
-	workerStartTimeout = 2 * time.Minute
+	workerStartTimeout = time.Minute
 
 	// max time allowed to run etcd command
-	etcdCommandTimeout = 2 * time.Second
+	etcdCommandTimeout = time.Second
 
-	etcdDialTimeout = 2 * time.Second
+	etcdDialTimeout = time.Second
 
 	stateStarting = 1
 	stateReady    = 2
 	stateStopped  = 3
 )
 
-// Worker coordinates through etcd to generate snowflake IDs. It does two tasks.
+// Worker coordinates through etcd to generate snowflake IDs.
 //  1. Coordinate through etcd to join and leave a cluster of workers.
 //     1.1. At any point in time, no two workers have the same worker ID.
 //     1.2. If a worker leaves the cluster and the worker ID is reused later, the timestamp associated with the worker ID
@@ -57,11 +58,11 @@ const (
 //
 // 2. Generate snowflake ID.
 type Worker struct {
-	etcdClient *clientv3.Client
+	etcdClient *ec.Client
 
 	generator    *Generator
 	workerID     int
-	leaseID      clientv3.LeaseID
+	leaseID      ec.LeaseID
 	maxWorkerCnt int
 
 	heartbeatTicker *time.Ticker
@@ -75,7 +76,7 @@ type Worker struct {
 
 // NewWorker creates a new worker and adds the worker to a cluster.
 func NewWorker(endpoints []string, prefix, username, password string, maxWorkerCnt int) (*Worker, error) {
-	cli, err := clientv3.New(clientv3.Config{
+	cli, err := ec.New(ec.Config{
 		Endpoints:   endpoints,
 		DialTimeout: etcdDialTimeout,
 		Username:    username,
@@ -180,7 +181,7 @@ func (s *Worker) start() bool {
 		}
 	}()
 
-	unavailableIDs := s.unavailableWorkerIDs(ctx)
+	unavailableIDs := s.workerIDsInUse(ctx)
 	id := 0
 	var g *Generator
 	for ; id < s.maxWorkerCnt; id++ {
@@ -232,11 +233,11 @@ func (s *Worker) reportLastUsedTime() bool {
 	defer cancel()
 
 	commit, err := s.etcdClient.Txn(ctx).If(
-		clientv3.Compare(clientv3.LeaseValue(workerKey), "=", s.leaseID),
+		ec.Compare(ec.LeaseValue(workerKey), "=", s.leaseID),
 	).Then(
-		clientv3.OpPut(reportedTimeKey, reportedTime),
+		ec.OpPut(reportedTimeKey, reportedTime),
 	).Else(
-		clientv3.OpGet(workerKey),
+		ec.OpGet(workerKey),
 	).Commit()
 
 	if err != nil || !commit.Succeeded || len(commit.Responses) != 1 {
@@ -258,7 +259,7 @@ func (s *Worker) reportLastUsedTime() bool {
 	return true
 }
 
-// Stop stops the snowflake worker. This is public method so that it can be called, e.g. called by the main thread on app exit.
+// Stop stops the worker. This is public method so that it can be called, e.g. called by the main thread on app exit.
 func (s *Worker) Stop() {
 	if s.state == stateStopped {
 		return
@@ -312,18 +313,22 @@ func (s *Worker) isWorkerIDAvailable(ctx context.Context, id int) bool {
 	return true
 }
 
-// claimWorkerID takes the worker id. Etcd transactions are serializable. Thus, no two workers can take the same ID.
+// claimWorkerID takes the worker id using etcd transactions.
+// Because etcd transactions are serializable, no two workers can take the same ID.
 func (s *Worker) claimWorkerID(ctx context.Context, id int) bool {
 	workerKey := liveWorkerKey(id)
 	reportedTimeKey := lastReportedTimestampKey(id)
 
 	commit, err := s.etcdClient.Txn(ctx).If(
-		clientv3.Compare(clientv3.Version(workerKey), "=", 0),
+		// test whether the worker ID is in use.
+		ec.Compare(ec.Version(workerKey), "=", 0),
 	).Then(
-		clientv3.OpPut(workerKey, strconv.FormatInt(time.Now().UnixMilli(), 10), clientv3.WithLease(s.leaseID)),
-		clientv3.OpGet(reportedTimeKey),
+		// claim the worker ID.
+		ec.OpPut(workerKey, strconv.FormatInt(time.Now().UnixMilli(), 10), ec.WithLease(s.leaseID)),
+		ec.OpGet(reportedTimeKey),
 	).Else(
-		clientv3.OpGet(workerKey),
+		// return the existing record of the worker ID.
+		ec.OpGet(workerKey),
 	).Commit()
 	if err != nil || !commit.Succeeded {
 		zap.S().Warnf("Cannot claim worker id %d in a transaction, %v, %+v", id, err, commit)
@@ -342,7 +347,7 @@ func (s *Worker) claimWorkerID(ctx context.Context, id int) bool {
 		if r.Count == 0 {
 			break
 		}
-		// The worker has been used before and there is a reported timestamp.
+		// The worker has been used previously and there is a reported timestamp.
 		v := string(r.Kvs[0].Value)
 		t, err := strconv.ParseInt(v, 10, 64)
 		if err != nil {
@@ -359,9 +364,8 @@ func (s *Worker) claimWorkerID(ctx context.Context, id int) bool {
 	return true
 }
 
-// unavailableWorkerIDs returns worker IDs that are in use.
-func (s *Worker) unavailableWorkerIDs(ctx context.Context) []int {
-	resp, err := s.etcdClient.Get(ctx, liveWorkerKeyPrefix, clientv3.WithPrefix())
+func (s *Worker) workerIDsInUse(ctx context.Context) []int {
+	resp, err := s.etcdClient.Get(ctx, liveWorkerKeyPrefix, ec.WithPrefix())
 	if err != nil {
 		zap.S().Error(err)
 		return nil
@@ -379,7 +383,7 @@ func (s *Worker) unavailableWorkerIDs(ctx context.Context) []int {
 	return ids
 }
 
-// StopChannel returns a channel that notifies when the snowflake worker has stopped.
+// StopChannel returns a channel that notifies when the worker has stopped.
 func (s *Worker) StopChannel() <-chan struct{} {
 	return s.stopChan
 }

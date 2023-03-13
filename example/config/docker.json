@@ -1,7 +1,7 @@
 {
   "etcd_endpoints": ["host.docker.internal:2379"],
-  "etcd_prefix": "/snowflake-id/",
-  "etcd_username": "snowflake-id",
+  "etcd_prefix": "/guiid/",
+  "etcd_username": "guiid",
   "etcd_password": "passwd",
   "max_server_cnt": 1024
 }

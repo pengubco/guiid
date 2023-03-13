@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 
-	pb "github.com/pengubco/snowflake-id/api/v1"
-	"github.com/pengubco/snowflake-id/worker"
+	pb "github.com/pengubco/guiid/api/v1"
+	"github.com/pengubco/guiid/worker"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"

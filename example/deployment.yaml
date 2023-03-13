@@ -1,31 +1,31 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: snowflake-id
-  namespace: snowflake-id
+  name: guiid
+  namespace: guiid
 spec:
   replicas: 5
   revisionHistoryLimit: 2
   selector:
     matchLabels:
-      app.kubernetes.io/name: snowflake-id
+      app.kubernetes.io/name: guiid
   template:
     metadata:
       labels:
-        app.kubernetes.io/name: snowflake-id
+        app.kubernetes.io/name: guiid
     spec:
       volumes:
         - name: config
           configMap:
-            name: snowflake-id-config
+            name: guiid-config
       containers:
-        - name: snowflake-id
-          image: pengubco/snowflake-id:v0.0.1
+        - name: guiid
+          image: pengubco/guiid:v0.0.1
           volumeMounts:
-            - mountPath: /etc/snowflake-id
+            - mountPath: /etc/guiid
               name: config
           args:
-            - '-config_from_file=/etc/snowflake-id/config.json'
+            - '-config_from_file=/etc/guiid/config.json'
           ports:
             - containerPort: 7669
             - containerPort: 800
@@ -34,11 +34,11 @@ spec:
 apiVersion: v1
 kind: Service
 metadata:
-  name: snowflake-id-svc
-  namespace: snowflake-id
+  name: guiid-svc
+  namespace: guiid
 spec:
   selector:
-    app.kubernetes.io/name: snowflake-id
+    app.kubernetes.io/name: guiid
   type: NodePort
   ports:
     - port: 7669
