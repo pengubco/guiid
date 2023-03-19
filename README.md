@@ -32,6 +32,7 @@ make build-go
 ./build/guiid -config_from_file=./example/config/localhost.json
 # make gRPC call to get a new ID
 echo '{}' | grpc-client-cli --proto ./api/v1/snowflake.proto --service=SnowflakeID --method=nextID localhost:7669
+echo '2' | grpc-client-cli --proto ./api/v1/snowflake.proto --service=SnowflakeID --method=nextMultipleIDs localhost:7669
 ```
 
 ### Run one GUIID server as a Docker container
@@ -42,6 +43,7 @@ make build-docker
 docker run --rm --name guiid --mount type=bind,source="$(pwd)"/example/config,target=/app-config -p 7669:7669 guiid -config_from_file=/app-config/docker.json
 # make gRPC call to get ID
 echo '{}' | grpc-client-cli --proto ./api/v1/snowflake.proto --service=SnowflakeID --method=nextID localhost:7669
+echo '2' | grpc-client-cli --proto ./api/v1/snowflake.proto --service=SnowflakeID --method=nextMultipleIDs localhost:7669
 ```
 
 ### Run a cluster of 5 GUIID servers in Kubernetes.
@@ -59,6 +61,7 @@ kubectl create -f ./example/deployment.yaml
 
 # make gRPC call to get snowflake ID. 
 echo '{}' | grpc-client-cli --proto ./api/v1/snowflake.proto --service=SnowflakeID --method=nextID [hostname-or-ip-of-node]:30001
+echo '2' | grpc-client-cli --proto ./api/v1/snowflake.proto --service=SnowflakeID --method=nextMultipleIDs [hostname-or-ip-of-node]:30001
 ```
 
 ## Contribute

@@ -3,9 +3,11 @@ syntax = "proto3";
 option go_package = "github.com/pengubco/guiid/api/v1";
 
 import "google/protobuf/empty.proto";
+import "google/protobuf/wrappers.proto";
 
 service SnowflakeID {
   rpc nextID(google.protobuf.Empty) returns (IDResponse);
+  rpc nextMultipleIDs(google.protobuf.UInt32Value) returns (stream IDResponse);
 }
 
 message IDResponse {
