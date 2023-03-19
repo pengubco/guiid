@@ -12,6 +12,7 @@ import (
 	codes "google.golang.org/grpc/codes"
 	status "google.golang.org/grpc/status"
 	emptypb "google.golang.org/protobuf/types/known/emptypb"
+	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // This is a compile-time assertion to ensure that this generated file
@@ -24,6 +25,7 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type SnowflakeIDClient interface {
 	NextID(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*IDResponse, error)
+	NextMultipleIDs(ctx context.Context, in *wrapperspb.UInt32Value, opts ...grpc.CallOption) (SnowflakeID_NextMultipleIDsClient, error)
 }
 
 type snowflakeIDClient struct {
@@ -43,11 +45,44 @@ func (c *snowflakeIDClient) NextID(ctx context.Context, in *emptypb.Empty, opts 
 	return out, nil
 }
 
+func (c *snowflakeIDClient) NextMultipleIDs(ctx context.Context, in *wrapperspb.UInt32Value, opts ...grpc.CallOption) (SnowflakeID_NextMultipleIDsClient, error) {
+	stream, err := c.cc.NewStream(ctx, &SnowflakeID_ServiceDesc.Streams[0], "/SnowflakeID/nextMultipleIDs", opts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &snowflakeIDNextMultipleIDsClient{stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+type SnowflakeID_NextMultipleIDsClient interface {
+	Recv() (*IDResponse, error)
+	grpc.ClientStream
+}
+
+type snowflakeIDNextMultipleIDsClient struct {
+	grpc.ClientStream
+}
+
+func (x *snowflakeIDNextMultipleIDsClient) Recv() (*IDResponse, error) {
+	m := new(IDResponse)
+	if err := x.ClientStream.RecvMsg(m); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
 // SnowflakeIDServer is the server API for SnowflakeID service.
 // All implementations must embed UnimplementedSnowflakeIDServer
 // for forward compatibility
 type SnowflakeIDServer interface {
 	NextID(context.Context, *emptypb.Empty) (*IDResponse, error)
+	NextMultipleIDs(*wrapperspb.UInt32Value, SnowflakeID_NextMultipleIDsServer) error
 	mustEmbedUnimplementedSnowflakeIDServer()
 }
 
@@ -57,6 +92,9 @@ type UnimplementedSnowflakeIDServer struct {
 
 func (UnimplementedSnowflakeIDServer) NextID(context.Context, *emptypb.Empty) (*IDResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method NextID not implemented")
+}
+func (UnimplementedSnowflakeIDServer) NextMultipleIDs(*wrapperspb.UInt32Value, SnowflakeID_NextMultipleIDsServer) error {
+	return status.Errorf(codes.Unimplemented, "method NextMultipleIDs not implemented")
 }
 func (UnimplementedSnowflakeIDServer) mustEmbedUnimplementedSnowflakeIDServer() {}
 
@@ -89,6 +127,27 @@ func _SnowflakeID_NextID_Handler(srv interface{}, ctx context.Context, dec func(
 	return interceptor(ctx, in, info, handler)
 }
 
+func _SnowflakeID_NextMultipleIDs_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(wrapperspb.UInt32Value)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(SnowflakeIDServer).NextMultipleIDs(m, &snowflakeIDNextMultipleIDsServer{stream})
+}
+
+type SnowflakeID_NextMultipleIDsServer interface {
+	Send(*IDResponse) error
+	grpc.ServerStream
+}
+
+type snowflakeIDNextMultipleIDsServer struct {
+	grpc.ServerStream
+}
+
+func (x *snowflakeIDNextMultipleIDsServer) Send(m *IDResponse) error {
+	return x.ServerStream.SendMsg(m)
+}
+
 // SnowflakeID_ServiceDesc is the grpc.ServiceDesc for SnowflakeID service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -101,6 +160,12 @@ var SnowflakeID_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _SnowflakeID_NextID_Handler,
 		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "nextMultipleIDs",
+			Handler:       _SnowflakeID_NextMultipleIDs_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "api/v1/snowflake.proto",
 }
