@@ -1,14 +1,14 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: guiid-config
-  namespace: guiid
+  name: i3d-config
+  namespace: i3d
 data:
   config.json: |
     {
       "etcd_endpoints": ["myetcd-svc:2379"],
-      "etcd_prefix": "/guiid/",
-      "etcd_username": "guiid",
+      "etcd_prefix": "/i3d/",
+      "etcd_username": "i3d",
       "etcd_password": "passwd",
       "max_server_cnt": 1024
     }

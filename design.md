@@ -1,4 +1,4 @@
-# Coordinate a cluster of servers running snowflake ID algorithm
+# Coordinate a cluster of nodes running snowflake ID algorithm
 
 The snowflake ID algorithm generates a 64 bits integer from the following threepieces of information. 
 1. timestamp in millisecond. The timestamp is encoded in 41 bits. 

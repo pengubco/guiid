@@ -1,8 +1,9 @@
-module github.com/pengubco/guiid
+module github.com/pengubco/i3d
 
 go 1.23
 
 require (
+	github.com/pengubco/guiid v0.0.0-20250118061608-8ac26d89ad64
 	github.com/prometheus/client_golang v1.20.5
 	github.com/stretchr/testify v1.10.0
 	go.etcd.io/etcd/client/v3 v3.5.17
