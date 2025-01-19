@@ -1,9 +1,10 @@
 package worker
 
 import (
-	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/assert"
 )
 
 func TestNewGenerator(t *testing.T) {
@@ -25,7 +26,7 @@ func TestNext(t *testing.T) {
 		return parse
 	}
 	ts := timeNow().UnixMilli()
-	expectedID := (ts << 22) | (1 << 12) | 0
+	expectedID := (ts << 22) | (1 << 12)
 	g, _ := NewGenerator(1)
 	id, drift := g.Next()
 	assert.Equal(t, int64(0), drift)
@@ -41,6 +42,6 @@ func TestNext(t *testing.T) {
 		parse, _ := time.Parse(time.RFC3339, "2006-01-02T15:04:04Z")
 		return parse
 	}
-	id, drift = g.Next()
+	_, drift = g.Next()
 	assert.Equal(t, int64(1000), drift)
 }

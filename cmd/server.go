@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
-	pb "github.com/pengubco/guiid/api/v1"
-	"github.com/pengubco/guiid/worker"
+	pb "github.com/pengubco/i3d/api/v1"
+	"github.com/pengubco/i3d/worker"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/types/known/emptypb"
@@ -33,13 +34,14 @@ func (s *Server) NextID(_ context.Context, _ *emptypb.Empty) (*pb.IDResponse, er
 			return nil, status.Error(codes.Unavailable, "clock drift. try later")
 		case worker.ErrClockDriftTooLargeToRecover:
 			return nil, status.Error(codes.Unavailable, "clock drift. try later")
-			return nil, status.Error(codes.Unavailable, "try later")
 		}
 	}
 	return &pb.IDResponse{Id: id}, nil
 }
 
 // must embed in grpc-go. See discussion at https://github.com/grpc/grpc-go/issues/3794
+//
+//nolint:unused
 func (s *Server) mustEmbedUnimplementedSnowflakeIDServer() {
 }
 

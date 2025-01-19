@@ -7,24 +7,25 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	_ "net/http/pprof"
+	_ "net/http/pprof" //nolint:gosec
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
 
-	pb "github.com/pengubco/guiid/api/v1"
-	"github.com/pengubco/guiid/worker"
+	pb "github.com/pengubco/i3d/api/v1"
+	"github.com/pengubco/i3d/worker"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 )
 
 const (
-	// the listening port of the grpc snowflake id server. 7669 is "SNOW" on old touch-tone keypad.
+	// The listening port of the grpc snowflake id server. 7669 is "SNOW" on old touch-tone keypad.
 	grpcPort = 7669
 
-	// the listening port for Prometheus metric, pprof and probing (/ready, /live)
+	// The listening port for Prometheus metric, pprof and probing (/ready, /live).
+	// Protect this port because it exposed /debug/pprof.
 	metricPort = 8001
 )
 
@@ -104,7 +105,7 @@ func setupMetricsServer() {
 	addr := fmt.Sprintf(":%d", metricPort)
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.Handler())
-	mux.HandleFunc("/ready", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/ready", func(w http.ResponseWriter, _ *http.Request) {
 		if snowflakeServer.w.Ready() {
 			w.WriteHeader(200)
 		} else {

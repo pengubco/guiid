@@ -1,5 +1,5 @@
 #syntax=docker/dockerfile:latest
-FROM golang:1.19-alpine AS build
+FROM golang:1.23-alpine AS build
 
 # disable CGO because of the cross-compiling: compile on alpine and run on scratch.
 ENV CGO_ENABLED=0
@@ -8,6 +8,11 @@ WORKDIR /usr/src/i3d
 
 COPY . .
 RUN --mount=type=cache,target=/go/pkg/mod \
+  CGO_ENABLED=0 go build -ldflags="-w -s \
+  -X main.Version=v1.0.0 \
+  -X main.BuildTime=$(date -u '+%Y-%m-%d_%H:%M:%S') \
+  -X main.GitCommit=$(git rev-parse HEAD)" \
+  -trimpath \
   go build -o ./i3d ./cmd
 
 FROM scratch

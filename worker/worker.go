@@ -4,9 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"golang.org/x/exp/slices"
 	"strconv"
 	"time"
+
+	"golang.org/x/exp/slices"
 
 	ec "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/client/v3/namespace"
@@ -154,7 +155,6 @@ func (s *Worker) NextID() (int64, error) {
 		s.Stop()
 		return 0, ErrClockDriftTooLargeToRecover
 	}
-	return id, nil
 }
 
 // start starts the worker by joining the cluster and setup background goroutines.
@@ -178,6 +178,7 @@ func (s *Worker) start() bool {
 	// Consume response here to avoid warning logs of "channel full" from the etcd client code.
 	go func() {
 		for range alive {
+			continue
 		}
 	}()
 
@@ -200,9 +201,8 @@ func (s *Worker) start() bool {
 		if !s.claimWorkerID(ctx, id) {
 			zap.S().Infof("cannot claim worker id %d", id)
 			continue
-		} else {
-			break
 		}
+		break
 	}
 	if id == s.maxWorkerCnt {
 		zap.S().Errorf("exhausted %d worker IDs", s.maxWorkerCnt)
